@@ -1903,7 +1903,7 @@ function read_binary(path) {
 	throw new Error("Cannot access file " + path);
 }
 function keys(o) {
-	var ks = Object.keys(o), o2 = [];
+	var ks = o ? Object.keys(o):[], o2 = [];
 	for(var i = 0; i < ks.length; ++i) if(o.hasOwnProperty(ks[i])) o2.push(ks[i]);
 	return o2;
 }
@@ -3739,6 +3739,7 @@ function write_ct(ct, opts) {
 	f3('themes');
 	['strs', 'styles'].forEach(f1);
 	['coreprops', 'extprops', 'custprops'].forEach(f3);
+	o[o.length] = '<Override PartName="/xl/drawings/drawing1.xml" ContentType="application/vnd.openxmlformats-officedocument.drawing+xml"/>';//zhp
 	f3('vba');
 	f3('comments');
 	f3('drawings');
@@ -3788,7 +3789,37 @@ var RELS_ROOT = writextag('Relationships', null, {
 	//'xmlns:ns0': XMLNS.RELS,
 	'xmlns': XMLNS.RELS
 });
-
+//zhp begin
+var DRAW_ROOT = writextag('xdr:wsDr', null, {
+	'xmlns:xdr': 'http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing',
+	'xmlns:a': 'http://schemas.openxmlformats.org/drawingml/2006/main'
+	//'xmlns:ns0': XMLNS.RELS,
+	// 'xmlns': XMLNS.RELS
+});
+ function write_drawing(images) {
+	var o = [];
+	o[o.length] = (XML_HEADER);
+	o[o.length] = (DRAW_ROOT);
+ 	for (var i = 0; i < images.length; i++) {
+		var image = images[i];
+		var pos = image.position || {};
+		if (pos.type === 'twoCellAnchor') {
+			var from = pos.from || {}, to = pos.to || {},
+			    fromCol = from.col || 0, toCol = to.col || 0,
+			    fromRow = from.row || 0, toRow = to.row || 0;
+ 			var twoCell = '<xdr:from><xdr:col>'+fromCol+'</xdr:col><xdr:colOff>0</xdr:colOff><xdr:row>'+fromRow+'</xdr:row><xdr:rowOff>0</xdr:rowOff></xdr:from>';
+			twoCell += '<xdr:to><xdr:col>'+toCol+'</xdr:col><xdr:colOff>0</xdr:colOff><xdr:row>'+toRow+'</xdr:row><xdr:rowOff>99999</xdr:rowOff></xdr:to>';
+			twoCell += '<xdr:pic><xdr:nvPicPr><xdr:cNvPr id="'+(i+1)+'" name="'+image.name+'">'
+			twoCell += '</xdr:cNvPr><xdr:cNvPicPr><a:picLocks noChangeAspect="1"/></xdr:cNvPicPr></xdr:nvPicPr>';
+			twoCell += '<xdr:blipFill><a:blip xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" r:embed="rId'+(i+1)+'"/>';
+			twoCell += '<a:stretch><a:fillRect/></a:stretch></xdr:blipFill><xdr:spPr><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></xdr:spPr></xdr:pic><xdr:clientData/>';
+			o[o.length] = (writextag('xdr:twoCellAnchor', twoCell, images[i].attrs));
+		}
+	}
+ 	if(o.length>2){ o[o.length] = ('</xdr:wsDr>'); o[1]=o[1].replace("/>",">"); }
+	return o.join("");
+}
+//zhp end
 /* TODO */
 function write_rels(rels) {
 	var o = [XML_HEADER, RELS_ROOT];
@@ -12574,7 +12605,10 @@ function write_ws_xml(idx, opts, wb, rels) {
 	/* customSheetViews */
 
 	if(ws['!merges'] != null && ws['!merges'].length > 0) o[o.length] = (write_ws_xml_merges(ws['!merges']));
-
+	// zhp beign
+	var images = ws['!images'] || [];
+	if (images.length) o[o.length] = '<drawing r:id="rId1"/>';
+	// zhp end
 	/* phoneticPr */
 	/* conditionalFormatting */
 	/* dataValidations */
@@ -19413,7 +19447,22 @@ f = "docProps/app.xml";
 			break; */
 			/* falls through */
 		default:
+			// zhp begin
+			var s = wb.SheetNames[rId-1], ws = wb.Sheets[s],
+				images = ws['!images'] || [];
+			var rels = ws['!rels'] = [], draw_rels = [];
+			for (var sId=1; sId < images.length+1; ++sId) {
+				var image = images[sId - 1];
+				f = 'xl/media/' + image.name;
+				zip.file(f, image.data, image.opts);
+				add_rels(draw_rels, sId, "../media/" + image.name, RELS.IMG);
+			}
+			zip.file("xl/drawings/drawing" + rId + "." + wbext, write_drawing(images));
+			add_rels(rels, rId, "../drawings/drawing" + rId + "." + wbext, RELS.DRAW);
+			zip.file("xl/drawings/_rels/drawing" + rId + "." + wbext + ".rels", write_rels(draw_rels));
+			zip.file("xl/worksheets/_rels/sheet" + rId + "." + wbext + '.rels', write_rels(rels));
 			f = "xl/worksheets/sheet" + rId + "." + wbext;
+			// zhp end
 			zip.file(f, write_ws(rId-1, f, opts, wb, wsrels));
 			ct.sheets.push(f);
 			add_rels(opts.wbrels, -1, "worksheets/sheet" + rId + "." + wbext, RELS.WS[0]);
